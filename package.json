@@ -1,0 +1,17 @@
+{
+  "name": "shopmart-backend",
+  "version": "1.0.0",
+  "description": "REST API backend server for ShopMart Woodcraft E-Commerce Platform",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.2",
+    "mysql2": "^3.23.2"
+  }
+}
