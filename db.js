@@ -60,6 +60,8 @@ async function initDb() {
         rating DECIMAL(3,2) DEFAULT 4.5,
         reviewCount INT DEFAULT 0,
         images TEXT,
+        image_url TEXT,
+        image_public_id VARCHAR(255),
         description TEXT,
         specifications TEXT,
         stock INT DEFAULT 10,
@@ -70,6 +72,9 @@ async function initDb() {
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    try { await connection.query('ALTER TABLE products ADD COLUMN image_url TEXT'); } catch (e) {}
+    try { await connection.query('ALTER TABLE products ADD COLUMN image_public_id VARCHAR(255)'); } catch (e) {}
 
     // 4. Orders Table
     await connection.query(`
