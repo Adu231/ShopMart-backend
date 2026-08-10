@@ -5,11 +5,13 @@ const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../cloudin
 
 // Multer middleware error handling wrapper supporting multiple file uploads
 const uploadMiddleware = (req, res, next) => {
+  console.log("[PRODUCT] uploadMiddleware started");
   upload.any()(req, res, (err) => {
     if (err) {
-      console.warn('⚠️ Multer Upload Middleware Warning:', err.message);
+      console.error("[PRODUCT] uploadMiddleware error:", err.message);
       return res.status(400).json({ success: false, message: err.message });
     }
+    console.log("[PRODUCT] uploadMiddleware completed successfully");
     next();
   });
 };
@@ -127,15 +129,58 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/products (Create product with Cloudinary multiple image upload)
+// POST /api/products (Create product with Cloudinary multiple image upload & diagnostic logs)
 router.post('/', uploadMiddleware, async (req, res) => {
+  console.log("[PRODUCT] 1. Request received");
+  console.log("[PRODUCT] 2. Authorization header present:", !!req.headers.authorization);
+  console.log("[PRODUCT] 3. req.body received, keys:", Object.keys(req.body || {}));
+  console.log("[PRODUCT] 4. req.files received, count:", Array.isArray(req.files) ? req.files.length : (req.files ? Object.keys(req.files).length : 0));
+  console.log("[PRODUCT] 4b. req.file single present:", !!req.file);
+
   try {
     const files = extractFilesFromReq(req);
-    console.log('📦 POST /api/products received:', {
-      fileCount: files.length,
-      fileNames: files.map(f => f.originalname),
-      bodyKeys: Object.keys(req.body || {}),
-    });
+    console.log("[PRODUCT] 5. Extracted files count:", files.length);
+
+    console.log("[PRODUCT] 6. Cloudinary upload phase started...");
+    const uploadedUrls = [];
+    const uploadedPublicIds = [];
+
+    if (files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        console.log(`[PRODUCT] 6a. Processing file ${i+1}/${files.length}, size: ${file.size} bytes, mime: ${file.mimetype}`);
+        try {
+          const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
+          uploadedUrls.push(uploadResult.secure_url);
+          uploadedPublicIds.push(uploadResult.public_id);
+          console.log(`[PRODUCT] 7. Cloudinary upload ${i+1} completed successfully:`, uploadResult.public_id);
+        } catch (cloudinaryErr) {
+          console.error(`[PRODUCT] 7. Cloudinary upload ${i+1} failed:`, cloudinaryErr.stack || cloudinaryErr.message);
+          const mimeType = file.mimetype || 'image/jpeg';
+          const base64Data = file.buffer.toString('base64');
+          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
+          console.log(`[PRODUCT] 7b. Fallback to base64 Data URL completed for file ${i+1}`);
+        }
+      }
+    }
+
+    if (uploadedUrls.length === 0) {
+      if (req.body.images) {
+        try {
+          const parsed = typeof req.body.images === 'string' ? JSON.parse(req.body.images) : req.body.images;
+          if (Array.isArray(parsed)) {
+            parsed.forEach(url => { if (typeof url === 'string' && url.trim()) uploadedUrls.push(url.trim()); });
+          } else if (typeof parsed === 'string' && parsed.trim()) {
+            uploadedUrls.push(parsed.trim());
+          }
+        } catch (e) {
+          console.error("[PRODUCT] Parsing req.body.images error:", e.message);
+        }
+      }
+      if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string') {
+        uploadedUrls.push(req.body.image_url.trim());
+      }
+    }
 
     const prodId = req.body.id || `p_${Date.now()}`;
     const name = req.body.name || 'New Product Listing';
@@ -148,59 +193,20 @@ router.post('/', uploadMiddleware, async (req, res) => {
     const seller = req.body.seller || 'Verified Seller';
     const description = req.body.description || '';
 
-    const uploadedUrls = [];
-    const uploadedPublicIds = [];
-
-    // Upload each attached image file to Cloudinary folder shopmart/products
-    if (files.length > 0) {
-      for (const file of files) {
-        try {
-          const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
-          uploadedUrls.push(uploadResult.secure_url);
-          uploadedPublicIds.push(uploadResult.public_id);
-          console.log('✅ Cloudinary image upload success:', {
-            public_id: uploadResult.public_id,
-            secure_url: uploadResult.secure_url,
-          });
-        } catch (cloudinaryErr) {
-          console.error('❌ Cloudinary Upload Error (Falling back to base64 Data URL):', cloudinaryErr.message);
-          const mimeType = file.mimetype || 'image/jpeg';
-          const base64Data = file.buffer.toString('base64');
-          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
-        }
-      }
-    }
-
-    // Fallback to body image fields if no files were uploaded
-    if (uploadedUrls.length === 0) {
-      if (req.body.images) {
-        try {
-          const parsed = typeof req.body.images === 'string' ? JSON.parse(req.body.images) : req.body.images;
-          if (Array.isArray(parsed)) {
-            parsed.forEach(url => { if (typeof url === 'string' && url.trim()) uploadedUrls.push(url.trim()); });
-          } else if (typeof parsed === 'string' && parsed.trim()) {
-            uploadedUrls.push(parsed.trim());
-          }
-        } catch {
-          if (typeof req.body.images === 'string' && req.body.images.trim()) {
-            uploadedUrls.push(req.body.images.trim());
-          }
-        }
-      }
-      if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string' && req.body.image_url.trim()) {
-        uploadedUrls.push(req.body.image_url.trim());
-      }
-    }
-
     const imageUrl = uploadedUrls.length > 0 ? uploadedUrls[0] : '';
     const imagePublicId = uploadedPublicIds.join(',');
     const imagesJson = JSON.stringify(uploadedUrls);
+
+    console.log("[PRODUCT] 8. Database INSERT started for prodId:", prodId);
+    console.log("[PRODUCT] 8a. Data lengths - imagesJson len:", imagesJson.length, "imageUrl len:", imageUrl.length, "publicId len:", imagePublicId.length);
 
     await pool.query(
       `INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
        VALUES (?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, ?, ?, ?, ?)`,
       [prodId, name, brand, category, price, originalPrice, discount, imagesJson, imageUrl, imagePublicId, description, stock, seller]
     );
+
+    console.log("[PRODUCT] 9. Database INSERT completed successfully");
 
     const newProduct = {
       id: prodId,
@@ -220,14 +226,19 @@ router.post('/', uploadMiddleware, async (req, res) => {
       description,
     };
 
+    console.log("[PRODUCT] 10. Response 201 sent successfully");
     return res.status(201).json({
       success: true,
       message: 'Product published to Railway MySQL & Cloudinary successfully',
       product: newProduct,
     });
   } catch (error) {
-    console.error('Error creating product:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    console.error("[PRODUCT] ERROR AT STEP:", error.stack || error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack,
+    });
   }
 });
 
