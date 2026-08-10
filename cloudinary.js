@@ -2,11 +2,26 @@ require('dotenv').config();
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 
+console.log('[CLOUDINARY CONFIG]', {
+  hasCloudName: Boolean(process.env.CLOUDINARY_CLOUD_NAME),
+  hasApiKey: Boolean(process.env.CLOUDINARY_API_KEY),
+  hasApiSecret: Boolean(process.env.CLOUDINARY_API_SECRET),
+  cloudNameLength: process.env.CLOUDINARY_CLOUD_NAME?.length,
+  apiKeyLength: process.env.CLOUDINARY_API_KEY?.length
+});
+
 // Configure Cloudinary with server-side environment variables
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+console.log('[CLOUDINARY SDK]', {
+  configured: Boolean(cloudinary.config().cloud_name),
+  cloudName: cloudinary.config().cloud_name,
+  hasApiKey: Boolean(cloudinary.config().api_key),
+  hasApiSecret: Boolean(cloudinary.config().api_secret)
 });
 
 // Memory storage so files are streamed directly to Cloudinary without permanent local storage
@@ -35,6 +50,17 @@ const upload = multer({
  */
 const uploadToCloudinary = (fileBuffer, folder = 'shopmart/products') => {
   return new Promise((resolve, reject) => {
+    console.log('[CLOUDINARY UPLOAD EXECUTE]', {
+      hasCloudName: Boolean(process.env.CLOUDINARY_CLOUD_NAME),
+      hasApiKey: Boolean(process.env.CLOUDINARY_API_KEY),
+      hasApiSecret: Boolean(process.env.CLOUDINARY_API_SECRET),
+      cloudNameLength: process.env.CLOUDINARY_CLOUD_NAME?.length,
+      apiKeyLength: process.env.CLOUDINARY_API_KEY?.length,
+      sdkCloudName: cloudinary.config().cloud_name,
+      sdkHasApiKey: Boolean(cloudinary.config().api_key),
+      sdkHasApiSecret: Boolean(cloudinary.config().api_secret)
+    });
+
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
       return reject(new Error('Cloudinary environment variables (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing on Render.'));
     }
@@ -46,7 +72,7 @@ const uploadToCloudinary = (fileBuffer, folder = 'shopmart/products') => {
       },
       (error, result) => {
         if (error) {
-          console.error('Cloudinary Stream Upload Error:', JSON.stringify(error, null, 2));
+          console.error('Cloudinary Stream Upload Error Object:', JSON.stringify(error, null, 2));
           return reject(new Error(error.message || JSON.stringify(error)));
         }
         resolve({
