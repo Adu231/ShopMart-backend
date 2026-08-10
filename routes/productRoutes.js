@@ -163,7 +163,10 @@ router.post('/', uploadMiddleware, async (req, res) => {
             secure_url: uploadResult.secure_url,
           });
         } catch (cloudinaryErr) {
-          console.error('❌ Cloudinary Upload Error:', cloudinaryErr.message);
+          console.error('❌ Cloudinary Upload Error (Falling back to base64 Data URL):', cloudinaryErr.message);
+          const mimeType = file.mimetype || 'image/jpeg';
+          const base64Data = file.buffer.toString('base64');
+          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
         }
       }
     }
@@ -248,7 +251,10 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
           uploadedUrls.push(uploadResult.secure_url);
           uploadedPublicIds.push(uploadResult.public_id);
         } catch (cloudinaryErr) {
-          console.error('❌ Cloudinary Upload Error in PUT:', cloudinaryErr.message);
+          console.error('❌ Cloudinary Upload Error in PUT (Falling back to base64 Data URL):', cloudinaryErr.message);
+          const mimeType = file.mimetype || 'image/jpeg';
+          const base64Data = file.buffer.toString('base64');
+          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
         }
       }
     }
