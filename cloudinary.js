@@ -11,18 +11,17 @@ cloudinary.config({
 // Memory storage so files are streamed directly to Cloudinary without permanent local storage
 const storage = multer.memoryStorage();
 
-// File upload validator
+// File upload validator for image types
 const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5 MB max file size limit
+    fileSize: 10 * 1024 * 1024, // 10 MB max file size limit
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
+    if (file.mimetype && file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid image file format. Only JPG, JPEG, PNG, and WEBP image files are allowed.'));
+      cb(new Error('Invalid file format. Only image files (JPG, PNG, WEBP, GIF, AVIF) are allowed.'));
     }
   },
 });
@@ -36,13 +35,13 @@ const upload = multer({
 const uploadToCloudinary = (fileBuffer, folder = 'shopmart/products') => {
   return new Promise((resolve, reject) => {
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-      return reject(new Error('Cloudinary environment variables (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are not set on Render.'));
+      return reject(new Error('Cloudinary environment variables (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing on Render.'));
     }
 
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
-        resource_type: 'image',
+        resource_type: 'auto',
       },
       (error, result) => {
         if (error) {
