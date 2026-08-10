@@ -149,17 +149,7 @@ async function initDb() {
       console.log('🌱 Demo Users seeded into Railway MySQL database.');
     }
 
-    // Seed Initial Products if Empty
-    const [prodRows] = await connection.query('SELECT COUNT(*) as count FROM products');
-    if (prodRows[0].count === 0) {
-      await connection.query(`
-        INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, description, stock, seller, isFeatured) VALUES
-        ('p1', 'Solid Teak 6-Seater Sectional Dining Set', 'Woodcraft Hub', 'Dining Room', 44999.00, 59999.00, 25, 4.80, 342, '["https://images.unsplash.com/photo-1617806118233-18e1de247200?auto=format&fit=crop&w=800&q=80"]', '100% Solid Teak Wood 6-Seater Sectional Dining Table Set.', 12, 'Samsung Electronics / Woodcraft Hub', 1),
-        ('p2', 'Modern Velvet 3-Seater Sofa', 'Royal Wood', 'Sofa & Seating', 28999.00, 39999.00, 27, 4.70, 189, '["https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80"]', 'Plush Royal Emerald Velvet Upholstered 3-Seater Sofa.', 8, 'Home Essentials Store', 1),
-        ('p3', 'Ergonomic Sheesham Study Table', 'Urban Crafted', 'Home Office', 12499.00, 16999.00, 26, 4.60, 94, '["https://images.unsplash.com/photo-1518455027359-f3f8164ba6bd?auto=format&fit=crop&w=800&q=80"]', 'Ergonomic Work From Home Sheesham Study Desk.', 15, 'TechZone India', 0)
-      `);
-      console.log('🌱 Products seeded into Railway MySQL database.');
-    }
+
 
     // Seed Initial Commission Rules if Empty
     const [commRows] = await connection.query('SELECT COUNT(*) as count FROM commission_rules');
