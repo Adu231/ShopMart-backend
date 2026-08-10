@@ -3,14 +3,30 @@ const router = express.Router();
 const { pool } = require('../db');
 const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../cloudinary');
 
-// Multer middleware error handling wrapper
+// Multer middleware error handling wrapper supporting multiple file uploads
 const uploadMiddleware = (req, res, next) => {
-  upload.single('image')(req, res, (err) => {
+  upload.any()(req, res, (err) => {
     if (err) {
+      console.warn('⚠️ Multer Upload Middleware Warning:', err.message);
       return res.status(400).json({ success: false, message: err.message });
     }
     next();
   });
+};
+
+// Helper function to extract array of file objects from req
+const extractFilesFromReq = (req) => {
+  if (Array.isArray(req.files)) return req.files;
+  if (req.files && typeof req.files === 'object') {
+    const filesList = [];
+    Object.values(req.files).forEach(val => {
+      if (Array.isArray(val)) filesList.push(...val);
+      else if (val) filesList.push(val);
+    });
+    return filesList;
+  }
+  if (req.file) return [req.file];
+  return [];
 };
 
 // GET /api/products (List active products)
@@ -48,7 +64,7 @@ router.get('/', async (req, res) => {
 
     const parsed = rows.map(p => {
       const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : null);
+      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
       const imagesList = Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []);
       return {
         ...p,
@@ -73,7 +89,7 @@ router.get('/unlisted/all', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE isUnlisted = TRUE');
     const parsed = rows.map(p => {
       const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : null);
+      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
       return {
         ...p,
         images: Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []),
@@ -95,7 +111,7 @@ router.get('/:id', async (req, res) => {
 
     const p = rows[0];
     const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-    const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : null);
+    const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
 
     const product = {
       ...p,
@@ -111,44 +127,71 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/products (Create product with Cloudinary image upload)
+// POST /api/products (Create product with Cloudinary multiple image upload)
 router.post('/', uploadMiddleware, async (req, res) => {
   try {
+    const files = extractFilesFromReq(req);
+    console.log('📦 POST /api/products received:', {
+      fileCount: files.length,
+      fileNames: files.map(f => f.originalname),
+      bodyKeys: Object.keys(req.body || {}),
+    });
+
     const prodId = req.body.id || `p_${Date.now()}`;
-    const name = req.body.name || 'New Woodcraft Listing';
-    const brand = req.body.brand || 'Woodcraft Seller';
-    const category = req.body.category || 'Living Room';
-    const price = Number(req.body.price) || 19999;
-    const originalPrice = Number(req.body.originalPrice) || (price ? Math.round(price * 1.25) : 24999);
-    const discount = Number(req.body.discount) || 20;
+    const name = req.body.name || 'New Product Listing';
+    const brand = req.body.brand || 'Verified Seller';
+    const category = req.body.category || 'General';
+    const price = Number(req.body.price) || 0;
+    const originalPrice = Number(req.body.originalPrice) || (price ? Math.round(price * 1.2) : 0);
+    const discount = Number(req.body.discount) || 0;
     const stock = Number(req.body.stock) || 10;
     const seller = req.body.seller || 'Verified Seller';
-    const description = req.body.description || 'Premium solid wood furniture item.';
+    const description = req.body.description || '';
 
-    let imageUrl = '';
-    let imagePublicId = '';
+    const uploadedUrls = [];
+    const uploadedPublicIds = [];
 
-    // If file attached in request multipart/form-data
-    if (req.file) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart');
-      imageUrl = uploadResult.secure_url;
-      imagePublicId = uploadResult.public_id;
-    } else if (req.body.image_url) {
-      imageUrl = req.body.image_url;
-    } else if (req.body.images) {
-      try {
-        const parsed = typeof req.body.images === 'string' ? JSON.parse(req.body.images) : req.body.images;
-        imageUrl = Array.isArray(parsed) ? parsed[0] : String(parsed);
-      } catch {
-        imageUrl = String(req.body.images);
+    // Upload each attached image file to Cloudinary folder shopmart/products
+    if (files.length > 0) {
+      for (const file of files) {
+        try {
+          const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
+          uploadedUrls.push(uploadResult.secure_url);
+          uploadedPublicIds.push(uploadResult.public_id);
+          console.log('✅ Cloudinary image upload success:', {
+            public_id: uploadResult.public_id,
+            secure_url: uploadResult.secure_url,
+          });
+        } catch (cloudinaryErr) {
+          console.error('❌ Cloudinary Upload Error:', cloudinaryErr.message);
+        }
       }
     }
 
-    if (!imageUrl) {
-      imageUrl = 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80';
+    // Fallback to body image fields if no files were uploaded
+    if (uploadedUrls.length === 0) {
+      if (req.body.images) {
+        try {
+          const parsed = typeof req.body.images === 'string' ? JSON.parse(req.body.images) : req.body.images;
+          if (Array.isArray(parsed)) {
+            parsed.forEach(url => { if (typeof url === 'string' && url.trim()) uploadedUrls.push(url.trim()); });
+          } else if (typeof parsed === 'string' && parsed.trim()) {
+            uploadedUrls.push(parsed.trim());
+          }
+        } catch {
+          if (typeof req.body.images === 'string' && req.body.images.trim()) {
+            uploadedUrls.push(req.body.images.trim());
+          }
+        }
+      }
+      if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string' && req.body.image_url.trim()) {
+        uploadedUrls.push(req.body.image_url.trim());
+      }
     }
 
-    const imagesJson = JSON.stringify([imageUrl]);
+    const imageUrl = uploadedUrls.length > 0 ? uploadedUrls[0] : '';
+    const imagePublicId = uploadedPublicIds.join(',');
+    const imagesJson = JSON.stringify(uploadedUrls);
 
     await pool.query(
       `INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
@@ -168,7 +211,7 @@ router.post('/', uploadMiddleware, async (req, res) => {
       reviewCount: 0,
       stock,
       seller,
-      images: [imageUrl],
+      images: uploadedUrls,
       image_url: imageUrl,
       image_public_id: imagePublicId,
       description,
@@ -185,27 +228,50 @@ router.post('/', uploadMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/products/:id (Update product details & optional image replacement)
+// PUT /api/products/:id (Update product details & multiple image replacement)
 router.put('/:id', uploadMiddleware, async (req, res) => {
   try {
+    const files = extractFilesFromReq(req);
     const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     const existing = rows[0];
+    const uploadedUrls = [];
+    const uploadedPublicIds = [];
+
+    if (files.length > 0) {
+      for (const file of files) {
+        try {
+          const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
+          uploadedUrls.push(uploadResult.secure_url);
+          uploadedPublicIds.push(uploadResult.public_id);
+        } catch (cloudinaryErr) {
+          console.error('❌ Cloudinary Upload Error in PUT:', cloudinaryErr.message);
+        }
+      }
+    }
+
     let newImageUrl = existing.image_url || '';
     let newImagePublicId = existing.image_public_id || '';
-    let oldPublicIdToDelete = null;
+    let imagesArray = typeof existing.images === 'string' ? JSON.parse(existing.images || '[]') : (existing.images || []);
 
-    // Check if new image file provided
-    if (req.file) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart/products');
-      oldPublicIdToDelete = existing.image_public_id;
-      newImageUrl = uploadResult.secure_url;
-      newImagePublicId = uploadResult.public_id;
+    if (uploadedUrls.length > 0) {
+      imagesArray = uploadedUrls;
+      newImageUrl = uploadedUrls[0];
+      newImagePublicId = uploadedPublicIds.join(',');
+
+      // Delete old Cloudinary assets if replaced
+      if (existing.image_public_id) {
+        const oldIds = existing.image_public_id.split(',').filter(Boolean);
+        for (const pubId of oldIds) {
+          await deleteFromCloudinary(pubId);
+        }
+      }
     } else if (req.body.image_url && req.body.image_url !== existing.image_url) {
       newImageUrl = req.body.image_url;
+      imagesArray = [newImageUrl];
     }
 
     const name = req.body.name !== undefined ? req.body.name : existing.name;
@@ -215,8 +281,6 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
     const originalPrice = req.body.originalPrice !== undefined ? Number(req.body.originalPrice) : Number(existing.originalPrice);
     const stock = req.body.stock !== undefined ? Number(req.body.stock) : Number(existing.stock);
     const description = req.body.description !== undefined ? req.body.description : existing.description;
-
-    const imagesArray = newImageUrl ? [newImageUrl] : (typeof existing.images === 'string' ? JSON.parse(existing.images || '[]') : existing.images);
     const imagesJson = JSON.stringify(imagesArray);
 
     await pool.query(
@@ -224,11 +288,6 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
        WHERE id = ?`,
       [name, brand, category, price, originalPrice, stock, description, imagesJson, newImageUrl, newImagePublicId, req.params.id]
     );
-
-    // Delete old Cloudinary asset only after DB update succeeds
-    if (oldPublicIdToDelete) {
-      await deleteFromCloudinary(oldPublicIdToDelete);
-    }
 
     const updatedProduct = {
       ...existing,
@@ -255,7 +314,7 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/products/:id (Delete / Unlist product and remove Cloudinary asset)
+// DELETE /api/products/:id (Delete / Unlist product and remove Cloudinary assets)
 router.delete('/:id', async (req, res) => {
   const { reason } = req.body || {};
   try {
@@ -264,9 +323,12 @@ router.delete('/:id', async (req, res) => {
 
     const product = rows[0];
 
-    // Safely delete Cloudinary image if public_id exists
+    // Safely delete Cloudinary image(s) if public_id exists
     if (product.image_public_id) {
-      await deleteFromCloudinary(product.image_public_id);
+      const pubIds = product.image_public_id.split(',').filter(Boolean);
+      for (const pubId of pubIds) {
+        await deleteFromCloudinary(pubId);
+      }
     }
 
     const unlistedReason = reason || 'Unlisted by catalog admin';
