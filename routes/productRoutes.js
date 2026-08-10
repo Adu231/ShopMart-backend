@@ -129,41 +129,38 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/products (Create product with Cloudinary multiple image upload & diagnostic logs)
+// POST /api/products (Create product with Cloudinary multiple image upload)
 router.post('/', uploadMiddleware, async (req, res) => {
-  console.log("[PRODUCT] 1. Request received");
-  console.log("[PRODUCT] 2. Authorization header present:", !!req.headers.authorization);
-  console.log("[PRODUCT] 3. req.body received, keys:", Object.keys(req.body || {}));
-  console.log("[PRODUCT] 4. req.files received, count:", Array.isArray(req.files) ? req.files.length : (req.files ? Object.keys(req.files).length : 0));
-  console.log("[PRODUCT] 4b. req.file single present:", !!req.file);
+  console.log("[PRODUCT] Request received");
+  console.log("[PRODUCT] req.body keys:", Object.keys(req.body || {}));
+  console.log("[PRODUCT] files count:", Array.isArray(req.files) ? req.files.length : (req.files ? Object.keys(req.files).length : (req.file ? 1 : 0)));
 
   try {
     const files = extractFilesFromReq(req);
-    console.log("[PRODUCT] 5. Extracted files count:", files.length);
-
-    console.log("[PRODUCT] 6. Cloudinary upload phase started...");
     const uploadedUrls = [];
     const uploadedPublicIds = [];
 
+    // Cloudinary upload step
     if (files.length > 0) {
+      console.log("[PRODUCT] Cloudinary upload started for", files.length, "file(s)");
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        console.log(`[PRODUCT] 6a. Processing file ${i+1}/${files.length}, size: ${file.size} bytes, mime: ${file.mimetype}`);
         try {
           const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
           uploadedUrls.push(uploadResult.secure_url);
           uploadedPublicIds.push(uploadResult.public_id);
-          console.log(`[PRODUCT] 7. Cloudinary upload ${i+1} completed successfully:`, uploadResult.public_id);
+          console.log(`[PRODUCT] Cloudinary upload success [${i+1}/${files.length}]:`, uploadResult.public_id);
         } catch (cloudinaryErr) {
-          console.error(`[PRODUCT] 7. Cloudinary upload ${i+1} failed:`, cloudinaryErr.stack || cloudinaryErr.message);
-          const mimeType = file.mimetype || 'image/jpeg';
-          const base64Data = file.buffer.toString('base64');
-          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
-          console.log(`[PRODUCT] 7b. Fallback to base64 Data URL completed for file ${i+1}`);
+          console.error(`[PRODUCT] Cloudinary upload failure [${i+1}/${files.length}]:`, cloudinaryErr.message);
+          return res.status(500).json({
+            success: false,
+            message: `Cloudinary image upload failed: ${cloudinaryErr.message}`,
+          });
         }
       }
     }
 
+    // Body image fallbacks if no file uploaded
     if (uploadedUrls.length === 0) {
       if (req.body.images) {
         try {
@@ -174,10 +171,10 @@ router.post('/', uploadMiddleware, async (req, res) => {
             uploadedUrls.push(parsed.trim());
           }
         } catch (e) {
-          console.error("[PRODUCT] Parsing req.body.images error:", e.message);
+          console.warn("[PRODUCT] Could not parse req.body.images:", e.message);
         }
       }
-      if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string') {
+      if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string' && req.body.image_url.trim()) {
         uploadedUrls.push(req.body.image_url.trim());
       }
     }
@@ -197,16 +194,21 @@ router.post('/', uploadMiddleware, async (req, res) => {
     const imagePublicId = uploadedPublicIds.join(',');
     const imagesJson = JSON.stringify(uploadedUrls);
 
-    console.log("[PRODUCT] 8. Database INSERT started for prodId:", prodId);
-    console.log("[PRODUCT] 8a. Data lengths - imagesJson len:", imagesJson.length, "imageUrl len:", imageUrl.length, "publicId len:", imagePublicId.length);
-
-    await pool.query(
-      `INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, ?, ?, ?, ?)`,
-      [prodId, name, brand, category, price, originalPrice, discount, imagesJson, imageUrl, imagePublicId, description, stock, seller]
-    );
-
-    console.log("[PRODUCT] 9. Database INSERT completed successfully");
+    console.log("[PRODUCT] Database INSERT started for prodId:", prodId);
+    try {
+      await pool.query(
+        `INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, ?, ?, ?, ?)`,
+        [prodId, name, brand, category, price, originalPrice, discount, imagesJson, imageUrl, imagePublicId, description, stock, seller]
+      );
+      console.log("[PRODUCT] Database INSERT success");
+    } catch (dbErr) {
+      console.error("[PRODUCT] Database INSERT exact MySQL error:", dbErr.message);
+      return res.status(500).json({
+        success: false,
+        message: `Database error during product creation: ${dbErr.message}`,
+      });
+    }
 
     const newProduct = {
       id: prodId,
@@ -226,18 +228,16 @@ router.post('/', uploadMiddleware, async (req, res) => {
       description,
     };
 
-    console.log("[PRODUCT] 10. Response 201 sent successfully");
     return res.status(201).json({
       success: true,
-      message: 'Product published to Railway MySQL & Cloudinary successfully',
+      message: 'Product published successfully',
       product: newProduct,
     });
   } catch (error) {
-    console.error("[PRODUCT] ERROR AT STEP:", error.stack || error);
+    console.error("[PRODUCT] Unexpected Server Error:", error.stack || error.message);
     return res.status(500).json({
       success: false,
-      error: error.message,
-      stack: error.stack,
+      message: error.message || 'Internal Server Error',
     });
   }
 });
