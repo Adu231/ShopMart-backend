@@ -35,13 +35,20 @@ const upload = multer({
  */
 const uploadToCloudinary = (fileBuffer, folder = 'shopmart/products') => {
   return new Promise((resolve, reject) => {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return reject(new Error('Cloudinary environment variables (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are not set on Render.'));
+    }
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
         resource_type: 'image',
       },
       (error, result) => {
-        if (error) return reject(error);
+        if (error) {
+          console.error('Cloudinary Stream Upload Error:', error.message || error);
+          return reject(new Error(error.message || 'Failed to upload image to Cloudinary'));
+        }
         resolve({
           secure_url: result.secure_url,
           public_id: result.public_id,

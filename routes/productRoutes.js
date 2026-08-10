@@ -7,6 +7,7 @@ const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../cloudin
 const uploadMiddleware = (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
+      console.warn('⚠️ Multer File Upload Error:', err.message);
       return res.status(400).json({ success: false, message: err.message });
     }
     next();
@@ -63,6 +64,7 @@ router.get('/', async (req, res) => {
 
     return res.json({ success: true, count: parsed.length, products: parsed });
   } catch (error) {
+    console.error('❌ Error in GET /api/products:', error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -83,6 +85,7 @@ router.get('/unlisted/all', async (req, res) => {
     });
     return res.json({ success: true, unlisted: parsed });
   } catch (error) {
+    console.error('❌ Error in GET /api/products/unlisted/all:', error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -107,6 +110,7 @@ router.get('/:id', async (req, res) => {
     };
     return res.json({ success: true, product });
   } catch (error) {
+    console.error(`❌ Error in GET /api/products/${req.params.id}:`, error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -114,6 +118,15 @@ router.get('/:id', async (req, res) => {
 // POST /api/products (Create product with Cloudinary image upload)
 router.post('/', uploadMiddleware, async (req, res) => {
   try {
+    // Debug logging for troubleshooting file and body inputs safely
+    console.log('📦 POST /api/products received:', {
+      hasFile: !!req.file,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+      mimeType: req.file?.mimetype,
+      bodyKeys: Object.keys(req.body || {}),
+    });
+
     const prodId = req.body.id || `p_${Date.now()}`;
     const name = req.body.name || 'New Woodcraft Listing';
     const brand = req.body.brand || 'Woodcraft Seller';
@@ -130,9 +143,21 @@ router.post('/', uploadMiddleware, async (req, res) => {
 
     // If file attached in request multipart/form-data
     if (req.file) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart/products');
-      imageUrl = uploadResult.secure_url;
-      imagePublicId = uploadResult.public_id;
+      try {
+        const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart/products');
+        imageUrl = uploadResult.secure_url;
+        imagePublicId = uploadResult.public_id;
+      } catch (cloudinaryErr) {
+        console.error('⚠️ Cloudinary Upload Failed:', cloudinaryErr.message);
+        if (req.body.image_url) {
+          imageUrl = req.body.image_url;
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: `Cloudinary Image Upload Failed: ${cloudinaryErr.message}. Ensure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET are set on Render environment variables.`,
+          });
+        }
+      }
     } else if (req.body.image_url) {
       imageUrl = req.body.image_url;
     } else if (req.body.images) {
@@ -180,14 +205,20 @@ router.post('/', uploadMiddleware, async (req, res) => {
       product: newProduct,
     });
   } catch (error) {
-    console.error('Error creating product:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Error creating product:', error.message);
+    return res.status(500).json({ success: false, error: `Database/Server error: ${error.message}` });
   }
 });
 
 // PUT /api/products/:id (Update product details & optional image replacement)
 router.put('/:id', uploadMiddleware, async (req, res) => {
   try {
+    console.log(`📦 PUT /api/products/${req.params.id} received:`, {
+      hasFile: !!req.file,
+      fileName: req.file?.originalname,
+      bodyKeys: Object.keys(req.body || {}),
+    });
+
     const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -200,10 +231,18 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
 
     // Check if new image file provided
     if (req.file) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart/products');
-      oldPublicIdToDelete = existing.image_public_id;
-      newImageUrl = uploadResult.secure_url;
-      newImagePublicId = uploadResult.public_id;
+      try {
+        const uploadResult = await uploadToCloudinary(req.file.buffer, 'shopmart/products');
+        oldPublicIdToDelete = existing.image_public_id;
+        newImageUrl = uploadResult.secure_url;
+        newImagePublicId = uploadResult.public_id;
+      } catch (cloudinaryErr) {
+        console.error('⚠️ Cloudinary Upload Error in PUT:', cloudinaryErr.message);
+        return res.status(400).json({
+          success: false,
+          message: `Image update failed: ${cloudinaryErr.message}`,
+        });
+      }
     } else if (req.body.image_url && req.body.image_url !== existing.image_url) {
       newImageUrl = req.body.image_url;
     }
@@ -250,7 +289,7 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
       product: updatedProduct,
     });
   } catch (error) {
-    console.error('Error updating product:', error);
+    console.error('❌ Error updating product:', error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -274,6 +313,7 @@ router.delete('/:id', async (req, res) => {
 
     return res.json({ success: true, message: `Product "${product.name}" deleted/unlisted successfully.` });
   } catch (error) {
+    console.error('❌ Error deleting product:', error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
