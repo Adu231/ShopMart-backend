@@ -1,3 +1,4 @@
+require('dotenv').config();
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 
@@ -41,12 +42,12 @@ const uploadToCloudinary = (fileBuffer, folder = 'shopmart/products') => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
-        resource_type: 'auto',
+        resource_type: 'image',
       },
       (error, result) => {
         if (error) {
-          console.error('Cloudinary Stream Upload Error:', error.message || error);
-          return reject(new Error(error.message || 'Failed to upload image to Cloudinary'));
+          console.error('Cloudinary Stream Upload Error:', JSON.stringify(error, null, 2));
+          return reject(new Error(error.message || JSON.stringify(error)));
         }
         resolve({
           secure_url: result.secure_url,
