@@ -151,11 +151,10 @@ router.post('/', uploadMiddleware, async (req, res) => {
           uploadedPublicIds.push(uploadResult.public_id);
           console.log(`[PRODUCT] Cloudinary upload success [${i+1}/${files.length}]:`, uploadResult.public_id);
         } catch (cloudinaryErr) {
-          console.error(`[PRODUCT] Cloudinary upload failure [${i+1}/${files.length}]:`, cloudinaryErr.message);
-          return res.status(500).json({
-            success: false,
-            message: `Cloudinary image upload failed: ${cloudinaryErr.message}`,
-          });
+          console.error(`[PRODUCT] Cloudinary upload failure [${i+1}/${files.length}], falling back to base64 Data URL:`, cloudinaryErr.message);
+          const mimeType = file.mimetype || 'image/jpeg';
+          const base64Data = file.buffer.toString('base64');
+          uploadedUrls.push(`data:${mimeType};base64,${base64Data}`);
         }
       }
     }
