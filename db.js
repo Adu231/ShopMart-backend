@@ -170,13 +170,25 @@ async function initDb() {
     }
 
     // Seed Admin User Only if No Users Exist
+    const bcrypt = require('bcryptjs');
     const [userRows] = await connection.query('SELECT COUNT(*) as count FROM users');
     if (userRows[0].count === 0) {
-      await connection.query(`
-        INSERT INTO users (id, name, email, password, role, status, isApproved) VALUES
-        ('admin_001', 'Admin User', 'admin@shopmart.com', 'Admin@2024', 'admin', 'Active', 1)
-      `);
-      console.log('🌱 Admin user seeded into Railway MySQL database.');
+      const adminHash = await bcrypt.hash('Admin@2024', 10);
+      await connection.query(
+        `INSERT INTO users (id, name, email, password, role, status, isApproved) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['admin_001', 'Admin User', 'admin@shopmart.com', adminHash, 'admin', 'Active', 1]
+      );
+      console.log('🌱 Admin user seeded with bcrypt hashed password into Railway MySQL database.');
+    } else {
+      // Hash any legacy plain text passwords in DB on startup
+      const [allUsers] = await connection.query('SELECT id, password FROM users');
+      for (const u of allUsers) {
+        if (u.password && !u.password.startsWith('$2a$') && !u.password.startsWith('$2b$')) {
+          const hashed = await bcrypt.hash(u.password, 10);
+          await connection.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+          console.log(`🔒 Auto-hashed legacy plain text password for user ${u.id}`);
+        }
+      }
     }
 
 
