@@ -143,6 +143,32 @@ async function initDb() {
       )
     `);
 
+    // 8. Categories Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        image_url TEXT,
+        image_public_id VARCHAR(255),
+        sortOrder INT DEFAULT 0,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Seed Initial Categories if Empty
+    const [catRows] = await connection.query('SELECT COUNT(*) as count FROM categories');
+    if (catRows[0].count === 0) {
+      await connection.query(`
+        INSERT INTO categories (id, name, image_url, sortOrder) VALUES
+        ('cat_1', 'Living Room', 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80', 1),
+        ('cat_2', 'Bedroom', 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?w=400&q=80', 2),
+        ('cat_3', 'Dining', 'https://images.unsplash.com/photo-1599327286062-3f4d8f3aaf77?w=400&q=80', 3),
+        ('cat_4', 'Study', 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=400&q=80', 4),
+        ('cat_5', 'Storage', 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80', 5)
+      `);
+      console.log('🌱 Default categories seeded.');
+    }
+
     // Seed Admin User Only if No Users Exist
     const [userRows] = await connection.query('SELECT COUNT(*) as count FROM users');
     if (userRows[0].count === 0) {

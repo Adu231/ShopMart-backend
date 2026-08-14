@@ -77,4 +77,84 @@ router.put('/sellers/:id/approve', authenticateToken, requireRole('admin'), asyn
   }
 });
 
+// ============================================================
+// CATEGORY MANAGEMENT ROUTES
+// ============================================================
+
+// GET /api/admin/categories (Public — used by seller dropdown too)
+router.get('/categories', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM categories ORDER BY sortOrder ASC, name ASC');
+    return res.json({ success: true, categories: rows });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/categories (Admin only — create new category)
+router.post('/categories', authenticateToken, requireRole('admin'), async (req, res) => {
+  const { name, image_url } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'Category name is required' });
+  }
+  try {
+    const id = `cat_${Date.now()}`;
+    const [existing] = await pool.query('SELECT id FROM categories WHERE LOWER(name) = LOWER(?)', [name.trim()]);
+    if (existing.length > 0) {
+      return res.status(400).json({ success: false, message: 'A category with this name already exists' });
+    }
+    const [countRows] = await pool.query('SELECT MAX(sortOrder) as maxOrder FROM categories');
+    const nextOrder = (countRows[0].maxOrder || 0) + 1;
+    await pool.query(
+      'INSERT INTO categories (id, name, image_url, sortOrder) VALUES (?, ?, ?, ?)',
+      [id, name.trim(), image_url || '', nextOrder]
+    );
+    return res.status(201).json({
+      success: true,
+      message: 'Category created successfully',
+      category: { id, name: name.trim(), image_url: image_url || '', sortOrder: nextOrder },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/admin/categories/:id (Admin only — update category)
+router.put('/categories/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  const { name, image_url } = req.body;
+  try {
+    const [rows] = await pool.query('SELECT * FROM categories WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Category not found' });
+    }
+    const updatedName = name ? name.trim() : rows[0].name;
+    const updatedImage = image_url !== undefined ? image_url : rows[0].image_url;
+    await pool.query(
+      'UPDATE categories SET name = ?, image_url = ? WHERE id = ?',
+      [updatedName, updatedImage, req.params.id]
+    );
+    return res.json({
+      success: true,
+      message: 'Category updated successfully',
+      category: { ...rows[0], name: updatedName, image_url: updatedImage },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/admin/categories/:id (Admin only — delete category)
+router.delete('/categories/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM categories WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Category not found' });
+    }
+    await pool.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
+    return res.json({ success: true, message: `Category "${rows[0].name}" deleted successfully` });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
