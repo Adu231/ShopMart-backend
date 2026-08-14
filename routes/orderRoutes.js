@@ -72,14 +72,21 @@ router.post('/', authenticateToken, async (req, res) => {
       : (req.body.address || 'Standard Doorstep Delivery');
     const paymentMethod = req.body.paymentMethod || 'Online Payment';
 
-    // Lookup sellerId from products table
-    let sellerId = 'u2'; // Default demo seller
+    // Lookup sellerId from products table and verify existence in users table for FK integrity
+    let sellerId = null;
     try {
       const [prods] = await pool.query('SELECT sellerId, seller FROM products WHERE id = ?', [productId]);
       if (prods.length > 0 && prods[0].sellerId) {
-        sellerId = prods[0].sellerId;
+        const [uRows] = await pool.query('SELECT id FROM users WHERE id = ?', [prods[0].sellerId]);
+        if (uRows.length > 0) {
+          sellerId = prods[0].sellerId;
+        }
       }
     } catch (e) {}
+
+    if (!sellerId || sellerId === '' || sellerId === 'null') {
+      sellerId = null;
+    }
 
     await pool.query(
       `INSERT INTO orders (id, userId, sellerId, customerName, customerEmail, productName, productId, amount, status, address, paymentMethod)
@@ -90,6 +97,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const newOrder = { id: orderId, userId, sellerId, customerName, customerEmail, productName, productId, amount, status, address, paymentMethod };
     return res.status(201).json({ success: true, message: 'Order placed and persisted successfully!', order: newOrder });
   } catch (error) {
+    console.error('Error placing order:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

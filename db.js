@@ -180,6 +180,22 @@ async function initDb() {
       )
     `);
 
+    // Safely add DB Relationship Foreign Keys & Performance Indexes
+    const safeAddDbConstraint = async (sql) => {
+      try { await connection.query(sql); } catch (e) {}
+    };
+
+    await safeAddDbConstraint('ALTER TABLE seller_profiles ADD CONSTRAINT fk_seller_user FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE');
+    await safeAddDbConstraint('ALTER TABLE products ADD CONSTRAINT fk_product_seller FOREIGN KEY (sellerId) REFERENCES users(id) ON DELETE SET NULL');
+    await safeAddDbConstraint('ALTER TABLE orders ADD CONSTRAINT fk_order_user FOREIGN KEY (userId) REFERENCES users(id) ON DELETE SET NULL');
+    await safeAddDbConstraint('ALTER TABLE orders ADD CONSTRAINT fk_order_seller FOREIGN KEY (sellerId) REFERENCES users(id) ON DELETE SET NULL');
+    await safeAddDbConstraint('ALTER TABLE wallet_transactions ADD CONSTRAINT fk_wallet_user FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE');
+
+    await safeAddDbConstraint('CREATE INDEX idx_orders_userId ON orders(userId)');
+    await safeAddDbConstraint('CREATE INDEX idx_orders_sellerId ON orders(sellerId)');
+    await safeAddDbConstraint('CREATE INDEX idx_products_sellerId ON products(sellerId)');
+    await safeAddDbConstraint('CREATE INDEX idx_products_category ON products(category)');
+
     // Seed Initial Categories if Empty
     const [catRows] = await connection.query('SELECT COUNT(*) as count FROM categories');
     if (catRows[0].count === 0) {
