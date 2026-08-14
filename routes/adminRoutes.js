@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../cloudinary');
+
+const uploadMiddleware = (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    next();
+  });
+};
 
 // GET /api/admin/commission-rules
 router.get('/commission-rules', authenticateToken, requireRole('admin'), async (req, res) => {
@@ -91,9 +101,24 @@ router.get('/categories', async (req, res) => {
   }
 });
 
-// POST /api/admin/categories (Admin only — create new category)
-router.post('/categories', authenticateToken, requireRole('admin'), async (req, res) => {
-  const { name, image_url } = req.body;
+// POST /api/admin/categories (Admin only — create new category with optional device file upload)
+router.post('/categories', authenticateToken, requireRole('admin'), uploadMiddleware, async (req, res) => {
+  const name = req.body.name;
+  let image_url = req.body.image_url || '';
+  let image_public_id = '';
+
+  const files = req.files || (req.file ? [req.file] : []);
+  if (files.length > 0) {
+    try {
+      const result = await uploadToCloudinary(files[0].buffer, 'shopmart/categories');
+      image_url = result.secure_url;
+      image_public_id = result.public_id;
+    } catch (err) {
+      console.error('[CATEGORY CLOUDINARY UPLOAD ERROR]', err.message);
+      return res.status(500).json({ success: false, message: `Image upload failed: ${err.message}` });
+    }
+  }
+
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, message: 'Category name is required' });
   }
@@ -106,13 +131,13 @@ router.post('/categories', authenticateToken, requireRole('admin'), async (req, 
     const [countRows] = await pool.query('SELECT MAX(sortOrder) as maxOrder FROM categories');
     const nextOrder = (countRows[0].maxOrder || 0) + 1;
     await pool.query(
-      'INSERT INTO categories (id, name, image_url, sortOrder) VALUES (?, ?, ?, ?)',
-      [id, name.trim(), image_url || '', nextOrder]
+      'INSERT INTO categories (id, name, image_url, image_public_id, sortOrder) VALUES (?, ?, ?, ?, ?)',
+      [id, name.trim(), image_url || '', image_public_id || '', nextOrder]
     );
     return res.status(201).json({
       success: true,
       message: 'Category created successfully',
-      category: { id, name: name.trim(), image_url: image_url || '', sortOrder: nextOrder },
+      category: { id, name: name.trim(), image_url: image_url || '', image_public_id: image_public_id || '', sortOrder: nextOrder },
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -120,23 +145,41 @@ router.post('/categories', authenticateToken, requireRole('admin'), async (req, 
 });
 
 // PUT /api/admin/categories/:id (Admin only — update category)
-router.put('/categories/:id', authenticateToken, requireRole('admin'), async (req, res) => {
-  const { name, image_url } = req.body;
+router.put('/categories/:id', authenticateToken, requireRole('admin'), uploadMiddleware, async (req, res) => {
+  const { name } = req.body;
   try {
     const [rows] = await pool.query('SELECT * FROM categories WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
-    const updatedName = name ? name.trim() : rows[0].name;
-    const updatedImage = image_url !== undefined ? image_url : rows[0].image_url;
+    const existing = rows[0];
+    let image_url = req.body.image_url !== undefined ? req.body.image_url : existing.image_url;
+    let image_public_id = existing.image_public_id || '';
+
+    const files = req.files || (req.file ? [req.file] : []);
+    if (files.length > 0) {
+      try {
+        const result = await uploadToCloudinary(files[0].buffer, 'shopmart/categories');
+        image_url = result.secure_url;
+        image_public_id = result.public_id;
+        if (existing.image_public_id) {
+          deleteFromCloudinary(existing.image_public_id).catch(() => {});
+        }
+      } catch (err) {
+        console.error('[CATEGORY CLOUDINARY UPLOAD ERROR]', err.message);
+        return res.status(500).json({ success: false, message: `Image upload failed: ${err.message}` });
+      }
+    }
+
+    const updatedName = name ? name.trim() : existing.name;
     await pool.query(
-      'UPDATE categories SET name = ?, image_url = ? WHERE id = ?',
-      [updatedName, updatedImage, req.params.id]
+      'UPDATE categories SET name = ?, image_url = ?, image_public_id = ? WHERE id = ?',
+      [updatedName, image_url, image_public_id, req.params.id]
     );
     return res.json({
       success: true,
       message: 'Category updated successfully',
-      category: { ...rows[0], name: updatedName, image_url: updatedImage },
+      category: { ...existing, name: updatedName, image_url, image_public_id },
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -150,6 +193,9 @@ router.delete('/categories/:id', authenticateToken, requireRole('admin'), async 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
+    if (rows[0].image_public_id) {
+      deleteFromCloudinary(rows[0].image_public_id).catch(() => {});
+    }
     await pool.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
     return res.json({ success: true, message: `Category "${rows[0].name}" deleted successfully` });
   } catch (error) {
@@ -158,3 +204,4 @@ router.delete('/categories/:id', authenticateToken, requireRole('admin'), async 
 });
 
 module.exports = router;
+
