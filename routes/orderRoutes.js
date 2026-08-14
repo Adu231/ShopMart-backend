@@ -94,9 +94,13 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/orders/:id/status (Seller/Admin Order Fulfillment Status Update)
+// PUT /api/orders/:id/status (Order Fulfillment & Return Status Update)
 router.put('/:id/status', authenticateToken, async (req, res) => {
   const { status } = req.body;
+  if (!status) {
+    return res.status(400).json({ success: false, message: 'Status is required' });
+  }
+
   try {
     const [rows] = await pool.query('SELECT * FROM orders WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
@@ -105,16 +109,26 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
 
     const order = rows[0];
 
-    // Authorization check: Must be Admin or the Seller of this order
-    if (req.user.role !== 'admin') {
-      if (req.user.role !== 'seller') {
-        return res.status(403).json({ success: false, message: 'Forbidden: Only sellers or admins can update order statuses.' });
+    // Authorization check
+    if (req.user.role === 'customer') {
+      const isOwner = order.userId === req.user.id || (order.customerEmail && order.customerEmail.toLowerCase() === req.user.email.toLowerCase());
+      if (!isOwner) {
+        return res.status(403).json({ success: false, message: 'Forbidden: You do not own this order.' });
       }
-      if (order.sellerId !== req.user.id) {
+      const allowedCustomerStatuses = ['return_requested', 'replacement_requested', 'cancelled'];
+      if (!allowedCustomerStatuses.includes(status)) {
+        return res.status(403).json({ success: false, message: 'Forbidden: Customers can only initiate returns, replacements, or cancellations.' });
+      }
+    } else if (req.user.role === 'seller') {
+      let isSellerOrder = order.sellerId === req.user.id;
+      if (!isSellerOrder) {
         const [prod] = await pool.query('SELECT sellerId, seller FROM products WHERE id = ?', [order.productId]);
-        if (prod.length === 0 || (prod[0].sellerId !== req.user.id && prod[0].seller !== req.user.name)) {
-          return res.status(403).json({ success: false, message: 'Forbidden: You do not own this order.' });
+        if (prod.length > 0 && (prod[0].sellerId === req.user.id || prod[0].seller === req.user.name)) {
+          isSellerOrder = true;
         }
+      }
+      if (!isSellerOrder) {
+        return res.status(403).json({ success: false, message: 'Forbidden: You do not own this seller order.' });
       }
     }
 
