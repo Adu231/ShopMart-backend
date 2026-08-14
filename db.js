@@ -27,9 +27,17 @@ async function initDb() {
         role ENUM('customer', 'seller', 'admin') DEFAULT 'customer',
         status ENUM('Pending', 'Active', 'Blocked', 'Suspended') DEFAULT 'Active',
         isApproved BOOLEAN DEFAULT TRUE,
+        wallet_balance DECIMAL(10,2) DEFAULT 0.00,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Ensure wallet_balance column exists if users table was created previously
+    try {
+      await connection.query('ALTER TABLE users ADD COLUMN wallet_balance DECIMAL(10,2) DEFAULT 0.00');
+    } catch (e) {
+      // Column already exists
+    }
 
     // 2. Seller Profiles Table
     await connection.query(`
@@ -152,6 +160,23 @@ async function initDb() {
         image_public_id VARCHAR(255),
         sortOrder INT DEFAULT 0,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 9. Wallet Transactions Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(100) PRIMARY KEY,
+        userId VARCHAR(100) NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        date VARCHAR(100),
+        status VARCHAR(20) DEFAULT 'completed',
+        referenceId VARCHAR(100),
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_wallet_userId (userId)
       )
     `);
 
