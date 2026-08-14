@@ -143,16 +143,14 @@ async function initDb() {
       )
     `);
 
-    // Seed Initial Demo Users if Empty
+    // Seed Admin User Only if No Users Exist
     const [userRows] = await connection.query('SELECT COUNT(*) as count FROM users');
     if (userRows[0].count === 0) {
       await connection.query(`
         INSERT INTO users (id, name, email, password, role, status, isApproved) VALUES
-        ('u1', 'Priya Customer', 'customer@demo.com', 'password123', 'customer', 'Active', 1),
-        ('u2', 'Rahul Seller', 'seller@demo.com', 'password123', 'seller', 'Active', 1),
-        ('u3', 'Admin User', 'admin@demo.com', 'password123', 'admin', 'Active', 1)
+        ('admin_001', 'Admin User', 'admin@shopmart.com', 'Admin@2024', 'admin', 'Active', 1)
       `);
-      console.log('🌱 Demo Users seeded into Railway MySQL database.');
+      console.log('🌱 Admin user seeded into Railway MySQL database.');
     }
 
 
