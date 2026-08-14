@@ -75,11 +75,14 @@ async function initDb() {
 
     try { await connection.query('ALTER TABLE products ADD COLUMN image_url TEXT'); } catch (e) {}
     try { await connection.query('ALTER TABLE products ADD COLUMN image_public_id VARCHAR(255)'); } catch (e) {}
+    try { await connection.query('ALTER TABLE products ADD COLUMN sellerId VARCHAR(100)'); } catch (e) {}
 
     // 4. Orders Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id VARCHAR(100) PRIMARY KEY,
+        userId VARCHAR(100),
+        sellerId VARCHAR(100),
         customerName VARCHAR(255),
         customerEmail VARCHAR(255),
         productName VARCHAR(255),
@@ -91,6 +94,9 @@ async function initDb() {
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    try { await connection.query('ALTER TABLE orders ADD COLUMN userId VARCHAR(100)'); } catch (e) {}
+    try { await connection.query('ALTER TABLE orders ADD COLUMN sellerId VARCHAR(100)'); } catch (e) {}
 
     // 5. Commission Rules Table
     await connection.query(`

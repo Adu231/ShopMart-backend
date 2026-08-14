@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const { pool } = require('../db');
+const { JWT_SECRET } = require('../middleware/auth');
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -17,6 +19,13 @@ router.post('/login', async (req, res) => {
 
     const user = rows[0];
     const { password: _, ...userWithoutPw } = user;
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, name: user.name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     return res.json({
       success: true,
       message: 'Login successful',
@@ -24,7 +33,7 @@ router.post('/login', async (req, res) => {
         ...userWithoutPw,
         isApproved: Boolean(user.isApproved),
       },
-      token: `jwt_token_${user.id}_${Date.now()}`
+      token,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Database login query failed', error: error.message });
@@ -64,10 +73,17 @@ router.post('/signup', async (req, res) => {
     }
 
     const newUser = { id: userId, name, email, role, status, isApproved };
+    const token = jwt.sign(
+      { id: userId, email, role, name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     return res.status(201).json({
       success: true,
       message: isSeller ? 'Seller account registered! Pending Super Admin approval.' : 'Customer account registered successfully.',
       user: newUser,
+      token,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Signup failed', error: error.message });

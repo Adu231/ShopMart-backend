@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { upload, uploadToCloudinary, deleteFromCloudinary } = require('../cloudinary');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 
 // Multer middleware error handling wrapper supporting multiple file uploads
 const uploadMiddleware = (req, res, next) => {
@@ -31,7 +32,26 @@ const extractFilesFromReq = (req) => {
   return [];
 };
 
-// GET /api/products (List active products)
+// Helper to format product SQL rows
+const formatProductRows = (rows) => {
+  return rows.map(p => {
+    const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
+    const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
+    const imagesList = Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []);
+    return {
+      ...p,
+      images: imagesList,
+      image_url: primaryImage,
+      price: Number(p.price),
+      originalPrice: Number(p.originalPrice),
+      rating: Number(p.rating),
+      isFeatured: Boolean(p.isFeatured),
+      isUnlisted: Boolean(p.isUnlisted),
+    };
+  });
+};
+
+// GET /api/products (Public active product catalog search/filter)
 router.get('/', async (req, res) => {
   const { category, brand, q, minPrice, maxPrice } = req.query;
 
@@ -63,21 +83,7 @@ router.get('/', async (req, res) => {
 
     sql += ' ORDER BY createdAt DESC';
     const [rows] = await pool.query(sql, params);
-
-    const parsed = rows.map(p => {
-      const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
-      const imagesList = Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []);
-      return {
-        ...p,
-        images: imagesList,
-        image_url: primaryImage,
-        price: Number(p.price),
-        originalPrice: Number(p.originalPrice),
-        rating: Number(p.rating),
-        isFeatured: Boolean(p.isFeatured),
-      };
-    });
+    const parsed = formatProductRows(rows);
 
     return res.json({ success: true, count: parsed.length, products: parsed });
   } catch (error) {
@@ -85,20 +91,41 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/products/unlisted/all (List unlisted products)
-router.get('/unlisted/all', async (req, res) => {
+// GET /api/products/seller/mine (Authenticated Seller Private Dashboard Products)
+router.get('/seller/mine', authenticateToken, requireRole('seller', 'admin'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM products WHERE isUnlisted = TRUE');
-    const parsed = rows.map(p => {
-      const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-      const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
-      return {
-        ...p,
-        images: Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []),
-        image_url: primaryImage,
-        price: Number(p.price),
-      };
-    });
+    let sql = 'SELECT * FROM products';
+    const params = [];
+
+    if (req.user.role === 'seller') {
+      sql += ' WHERE (sellerId = ? OR seller = ?)';
+      params.push(req.user.id, req.user.name);
+    }
+
+    sql += ' ORDER BY createdAt DESC';
+    const [rows] = await pool.query(sql, params);
+    const parsed = formatProductRows(rows);
+
+    return res.json({ success: true, count: parsed.length, products: parsed });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/products/unlisted/all (Authenticated Seller / Admin Unlisted Products)
+router.get('/unlisted/all', authenticateToken, requireRole('seller', 'admin'), async (req, res) => {
+  try {
+    let sql = 'SELECT * FROM products WHERE isUnlisted = TRUE';
+    const params = [];
+
+    if (req.user.role === 'seller') {
+      sql += ' AND (sellerId = ? OR seller = ?)';
+      params.push(req.user.id, req.user.name);
+    }
+
+    const [rows] = await pool.query(sql, params);
+    const parsed = formatProductRows(rows);
+
     return res.json({ success: true, unlisted: parsed });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -111,29 +138,16 @@ router.get('/:id', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Product not found' });
 
-    const p = rows[0];
-    const parsedImages = typeof p.images === 'string' ? JSON.parse(p.images || '[]') : (p.images || []);
-    const primaryImage = p.image_url || (Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages[0] : '');
-
-    const product = {
-      ...p,
-      images: Array.isArray(parsedImages) && parsedImages.length > 0 ? parsedImages : (primaryImage ? [primaryImage] : []),
-      image_url: primaryImage,
-      price: Number(p.price),
-      originalPrice: Number(p.originalPrice),
-      rating: Number(p.rating),
-    };
-    return res.json({ success: true, product });
+    const parsed = formatProductRows(rows);
+    return res.json({ success: true, product: parsed[0] });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST /api/products (Create product with Cloudinary multiple image upload)
-router.post('/', uploadMiddleware, async (req, res) => {
-  console.log("[PRODUCT] Request received");
-  console.log("[PRODUCT] req.body keys:", Object.keys(req.body || {}));
-  console.log("[PRODUCT] files count:", Array.isArray(req.files) ? req.files.length : (req.files ? Object.keys(req.files).length : (req.file ? 1 : 0)));
+// POST /api/products (Authenticated Seller Product Creation)
+router.post('/', authenticateToken, requireRole('seller', 'admin'), uploadMiddleware, async (req, res) => {
+  console.log("[PRODUCT] Request received from seller:", req.user.id, req.user.name);
 
   try {
     const files = extractFilesFromReq(req);
@@ -142,16 +156,14 @@ router.post('/', uploadMiddleware, async (req, res) => {
 
     // Cloudinary upload step
     if (files.length > 0) {
-      console.log("[PRODUCT] Cloudinary upload started for", files.length, "file(s)");
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
           const uploadResult = await uploadToCloudinary(file.buffer, 'shopmart/products');
           uploadedUrls.push(uploadResult.secure_url);
           uploadedPublicIds.push(uploadResult.public_id);
-          console.log(`[PRODUCT] Cloudinary upload success [${i+1}/${files.length}]:`, uploadResult.public_id);
         } catch (cloudinaryErr) {
-          console.error(`[PRODUCT] Cloudinary upload failure [${i+1}/${files.length}]:`, cloudinaryErr.message);
+          console.error(`[PRODUCT] Cloudinary upload failure:`, cloudinaryErr.message);
           return res.status(500).json({
             success: false,
             message: `Cloudinary image upload failed: ${cloudinaryErr.message}`,
@@ -170,9 +182,7 @@ router.post('/', uploadMiddleware, async (req, res) => {
           } else if (typeof parsed === 'string' && parsed.trim()) {
             uploadedUrls.push(parsed.trim());
           }
-        } catch (e) {
-          console.warn("[PRODUCT] Could not parse req.body.images:", e.message);
-        }
+        } catch (e) {}
       }
       if (uploadedUrls.length === 0 && req.body.image_url && typeof req.body.image_url === 'string' && req.body.image_url.trim()) {
         uploadedUrls.push(req.body.image_url.trim());
@@ -181,37 +191,31 @@ router.post('/', uploadMiddleware, async (req, res) => {
 
     const prodId = req.body.id || `p_${Date.now()}`;
     const name = req.body.name || 'New Product Listing';
-    const brand = req.body.brand || 'Verified Seller';
+    const brand = req.body.brand || req.user.name || 'Verified Seller';
     const category = req.body.category || 'General';
     const price = Number(req.body.price) || 0;
     const originalPrice = Number(req.body.originalPrice) || (price ? Math.round(price * 1.2) : 0);
     const discount = Number(req.body.discount) || 0;
     const stock = Number(req.body.stock) || 10;
-    const seller = req.body.seller || 'Verified Seller';
+
+    // Direct injection of verified identity from token
+    const sellerId = req.user.id;
+    const seller = req.user.name || req.body.seller || 'Verified Seller';
     const description = req.body.description || '';
 
     const imageUrl = uploadedUrls.length > 0 ? uploadedUrls[0] : '';
     const imagePublicId = uploadedPublicIds.join(',');
     const imagesJson = JSON.stringify(uploadedUrls);
 
-    console.log("[PRODUCT] Database INSERT started for prodId:", prodId);
-    try {
-      await pool.query(
-        `INSERT INTO products (id, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, ?, ?, ?, ?)`,
-        [prodId, name, brand, category, price, originalPrice, discount, imagesJson, imageUrl, imagePublicId, description, stock, seller]
-      );
-      console.log("[PRODUCT] Database INSERT success");
-    } catch (dbErr) {
-      console.error("[PRODUCT] Database INSERT exact MySQL error:", dbErr.message);
-      return res.status(500).json({
-        success: false,
-        message: `Database error during product creation: ${dbErr.message}`,
-      });
-    }
+    await pool.query(
+      `INSERT INTO products (id, sellerId, name, brand, category, price, originalPrice, discount, rating, reviewCount, images, image_url, image_public_id, description, stock, seller)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, ?, ?, ?, ?)`,
+      [prodId, sellerId, name, brand, category, price, originalPrice, discount, imagesJson, imageUrl, imagePublicId, description, stock, seller]
+    );
 
     const newProduct = {
       id: prodId,
+      sellerId,
       name,
       brand,
       category,
@@ -242,8 +246,8 @@ router.post('/', uploadMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/products/:id (Update product details & multiple image replacement)
-router.put('/:id', uploadMiddleware, async (req, res) => {
+// PUT /api/products/:id (Update product details & ownership protection)
+router.put('/:id', authenticateToken, requireRole('seller', 'admin'), uploadMiddleware, async (req, res) => {
   try {
     const files = extractFilesFromReq(req);
     const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
@@ -252,6 +256,12 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
     }
 
     const existing = rows[0];
+
+    // Ownership check
+    if (req.user.role !== 'admin' && existing.sellerId !== req.user.id && existing.seller !== req.user.name) {
+      return res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to modify this product.' });
+    }
+
     const uploadedUrls = [];
     const uploadedPublicIds = [];
 
@@ -263,7 +273,7 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
           uploadedUrls.push(uploadResult.secure_url);
           uploadedPublicIds.push(uploadResult.public_id);
         } catch (cloudinaryErr) {
-          console.error(`❌ Cloudinary Upload Error in PUT [${i+1}/${files.length}]:`, cloudinaryErr.message);
+          console.error(`❌ Cloudinary Upload Error in PUT:`, cloudinaryErr.message);
           return res.status(500).json({
             success: false,
             message: `Cloudinary image upload failed: ${cloudinaryErr.message}`,
@@ -281,7 +291,6 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
       newImageUrl = uploadedUrls[0];
       newImagePublicId = uploadedPublicIds.join(',');
 
-      // Delete old Cloudinary assets if replaced
       if (existing.image_public_id) {
         const oldIds = existing.image_public_id.split(',').filter(Boolean);
         for (const pubId of oldIds) {
@@ -333,16 +342,22 @@ router.put('/:id', uploadMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/products/:id (Delete / Unlist product and remove Cloudinary assets)
-router.delete('/:id', async (req, res) => {
-  const { reason } = req.body || {};
+// DELETE /api/products/:id (Delete / Unlist product & ownership protection)
+router.delete('/:id', authenticateToken, requireRole('seller', 'admin'), async (req, res) => {
+  const { reason, permanent } = req.body || {};
+  const isPermanent = permanent === true || req.query.permanent === 'true';
+
   try {
     const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Product not found' });
 
     const product = rows[0];
 
-    // Safely delete Cloudinary image(s) if public_id exists
+    // Ownership check
+    if (req.user.role !== 'admin' && product.sellerId !== req.user.id && product.seller !== req.user.name) {
+      return res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to delete this product.' });
+    }
+
     if (product.image_public_id) {
       const pubIds = product.image_public_id.split(',').filter(Boolean);
       for (const pubId of pubIds) {
@@ -350,11 +365,25 @@ router.delete('/:id', async (req, res) => {
       }
     }
 
-    const unlistedReason = reason || 'Unlisted by catalog admin';
-    await pool.query('UPDATE products SET isUnlisted = TRUE, unlistedReason = ? WHERE id = ?', [unlistedReason, req.params.id]);
+    if (isPermanent) {
+      await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
+      return res.json({
+        success: true,
+        message: `Product "${product.name}" permanently deleted successfully.`,
+        productId: req.params.id,
+      });
+    } else {
+      const unlistedReason = reason || 'Unlisted by seller/admin';
+      await pool.query('UPDATE products SET isUnlisted = TRUE, unlistedReason = ? WHERE id = ?', [unlistedReason, req.params.id]);
 
-    return res.json({ success: true, message: `Product "${product.name}" deleted/unlisted successfully.` });
+      return res.json({
+        success: true,
+        message: `Product "${product.name}" unlisted and removed from catalog successfully.`,
+        productId: req.params.id,
+      });
+    }
   } catch (error) {
+    console.error('Error deleting product:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

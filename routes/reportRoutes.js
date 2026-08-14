@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 
-// GET /api/reports
-router.get('/', async (req, res) => {
+// GET /api/reports (Admin Overview Reports)
+router.get('/', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM reports ORDER BY createdAt DESC');
     return res.json({ success: true, count: rows.length, reports: rows });
@@ -13,17 +14,17 @@ router.get('/', async (req, res) => {
 });
 
 // PUT /api/reports/:id/solve
-router.put('/:id/solve', async (req, res) => {
+router.put('/:id/solve', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     await pool.query('UPDATE reports SET status = "Resolved" WHERE id = ?', [req.params.id]);
-    return res.json({ success: true, message: `Report #${req.params.id} marked as solved in Railway MySQL!` });
+    return res.json({ success: true, message: `Report #${req.params.id} marked as solved.` });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // PUT /api/reports/:id/reopen
-router.put('/:id/reopen', async (req, res) => {
+router.put('/:id/reopen', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     await pool.query('UPDATE reports SET status = "In Progress" WHERE id = ?', [req.params.id]);
     return res.json({ success: true, message: `Report #${req.params.id} reopened.` });
@@ -33,7 +34,7 @@ router.put('/:id/reopen', async (req, res) => {
 });
 
 // POST /api/reports/:id/warning
-router.post('/:id/warning', async (req, res) => {
+router.post('/:id/warning', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM reports WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Report ticket not found' });
@@ -56,10 +57,19 @@ router.post('/:id/warning', async (req, res) => {
   }
 });
 
-// GET /api/reports/warnings/seller
-router.get('/warnings/seller', async (req, res) => {
+// GET /api/reports/warnings/seller (Seller-Scoped Warning Notices)
+router.get('/warnings/seller', authenticateToken, requireRole('seller', 'admin'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM seller_warnings ORDER BY createdAt DESC');
+    let sql = 'SELECT * FROM seller_warnings';
+    const params = [];
+
+    if (req.user.role === 'seller') {
+      sql += ' WHERE sellerName = ?';
+      params.push(req.user.name);
+    }
+
+    sql += ' ORDER BY createdAt DESC';
+    const [rows] = await pool.query(sql, params);
     return res.json({ success: true, warnings: rows });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

@@ -9,10 +9,12 @@
     "dev": "node server.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "mysql2": "^3.23.2"
   }

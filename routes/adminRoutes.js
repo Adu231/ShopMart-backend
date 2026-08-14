@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 
 // GET /api/admin/commission-rules
-router.get('/commission-rules', async (req, res) => {
+router.get('/commission-rules', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM commission_rules ORDER BY id DESC LIMIT 1');
     if (rows.length > 0) {
@@ -19,7 +20,7 @@ router.get('/commission-rules', async (req, res) => {
 });
 
 // POST /api/admin/commission-rules
-router.post('/commission-rules', async (req, res) => {
+router.post('/commission-rules', authenticateToken, requireRole('admin'), async (req, res) => {
   const { standardRate, returnReversalRate, minPayoutThreshold, categoryTaxRate } = req.body;
   try {
     const [rows] = await pool.query('SELECT id FROM commission_rules LIMIT 1');
@@ -41,7 +42,7 @@ router.post('/commission-rules', async (req, res) => {
 });
 
 // GET /api/admin/sellers
-router.get('/sellers', async (req, res) => {
+router.get('/sellers', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT u.id, u.name, u.email, u.status, u.isApproved, u.createdAt,
@@ -64,7 +65,7 @@ router.get('/sellers', async (req, res) => {
 });
 
 // PUT /api/admin/sellers/:id/approve
-router.put('/sellers/:id/approve', async (req, res) => {
+router.put('/sellers/:id/approve', authenticateToken, requireRole('admin'), async (req, res) => {
   const { status = 'Active' } = req.body;
   const isApproved = status === 'Active';
 
