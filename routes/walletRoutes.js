@@ -41,8 +41,12 @@ router.post('/topup', authenticateToken, async (req, res) => {
   const { amount, paymentMode = 'upi' } = req.body;
   const amt = Number(amount);
 
-  if (!amt || amt <= 0) {
+  if (!amt || amt <= 0 || isNaN(amt)) {
     return res.status(400).json({ success: false, message: 'Invalid top-up amount' });
+  }
+
+  if (amt > 10000000) {
+    return res.status(400).json({ success: false, message: 'Top-up amount cannot exceed ₹1,00,00,000 per transaction' });
   }
 
   try {

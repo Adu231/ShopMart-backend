@@ -27,16 +27,21 @@ async function initDb() {
         role ENUM('customer', 'seller', 'admin') DEFAULT 'customer',
         status ENUM('Pending', 'Active', 'Blocked', 'Suspended') DEFAULT 'Active',
         isApproved BOOLEAN DEFAULT TRUE,
-        wallet_balance DECIMAL(10,2) DEFAULT 0.00,
+        wallet_balance DECIMAL(15,2) DEFAULT 0.00,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Ensure wallet_balance column exists if users table was created previously
+    // Ensure wallet_balance column exists and has proper precision (DECIMAL 15,2)
     try {
-      await connection.query('ALTER TABLE users ADD COLUMN wallet_balance DECIMAL(10,2) DEFAULT 0.00');
+      await connection.query('ALTER TABLE users ADD COLUMN wallet_balance DECIMAL(15,2) DEFAULT 0.00');
     } catch (e) {
       // Column already exists
+    }
+    try {
+      await connection.query('ALTER TABLE users MODIFY COLUMN wallet_balance DECIMAL(15,2) DEFAULT 0.00');
+    } catch (e) {
+      console.error('Failed to modify wallet_balance column:', e.message);
     }
 
     // 2. Seller Profiles Table
@@ -171,7 +176,7 @@ async function initDb() {
         type VARCHAR(20) NOT NULL,
         title VARCHAR(255) NOT NULL,
         category VARCHAR(50) NOT NULL,
-        amount DECIMAL(10,2) NOT NULL,
+        amount DECIMAL(15,2) NOT NULL,
         date VARCHAR(100),
         status VARCHAR(20) DEFAULT 'completed',
         referenceId VARCHAR(100),
@@ -179,6 +184,10 @@ async function initDb() {
         INDEX idx_wallet_userId (userId)
       )
     `);
+
+    try {
+      await connection.query('ALTER TABLE wallet_transactions MODIFY COLUMN amount DECIMAL(15,2) NOT NULL');
+    } catch (e) {}
 
     // Safely add DB Relationship Foreign Keys & Performance Indexes
     const safeAddDbConstraint = async (sql) => {
